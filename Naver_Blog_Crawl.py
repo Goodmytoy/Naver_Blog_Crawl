@@ -1,7 +1,9 @@
 import os
 import sys
+# from tkinter import E
 import urllib
 import urllib3
+from urllib import parse
 import requests
 import json
 import xmltodict
@@ -17,6 +19,10 @@ from copy import deepcopy
 import pickle
 import asyncio
 import functools
+import time
+import random
+
+
 
 
 
@@ -82,27 +88,73 @@ class NaverBlogCrawl:
 
 
     # @check_execution_time
-    def search_blogs_by_API(self, keyword:str, display:int) -> dict:
-        blog_infos = defaultdict(list)
-        self.keyword = keyword
-        # API를 통한 검색
-        encText = urllib.parse.quote(self.keyword)
-        url = f"https://openapi.naver.com/v1/search/blog.xml?query={encText}&display={display}"
+    # def search_blogs_by_API(self, keyword:str, display:int) -> dict:
+    #     blog_infos = defaultdict(list)
+    #     self.keyword = keyword
+    #     # API를 통한 검색
+    #     encText = urllib.parse.quote(self.keyword)
+    #     url = f"https://openapi.naver.com/v1/search/blog.xml?query={encText}&display={display}"
 
-        headers = {"X-Naver-Client-Id" : self.client_id,
-                   "X-Naver-Client-Secret" : self.client_secret}
-        rq = requests_retry_session().get(url, headers=headers, verify=False)
+    #     headers = {"X-Naver-Client-Id" : self.client_id,
+    #                "X-Naver-Client-Secret" : self.client_secret}
+
+    #     rq = requests_retry_session().get(url, headers=headers, verify=False)
+    #     html = rq.text
+    #     html_dict = xmltodict.parse(html)
+    #     self.html_dict = html_dict
+
+    #     if html_dict["rss"]["channel"]["total"] == "0":
+    #         blog_infos = None
+    #     else:
+    #         blog_infos = html_dict["rss"]["channel"]["item"]
+
+        
+    #     return blog_infos
+
+
+    def request_blog_api(self, keyword:str, display:int=100, start:int=1) -> dict:
+        client_id = "VyJ4vDh18O7CVkYDCROr"
+        client_secret = "pOn2vw75sv"
+        blog_infos = defaultdict(list)
+        # self.keyword = keyword
+        # API를 통한 검색
+        encText = urllib.parse.quote(keyword)
+        url = f"https://openapi.naver.com/v1/search/blog.xml?query={encText}&display={display}&start={start}"
+
+        headers = {"X-Naver-Client-Id" : client_id,
+                    "X-Naver-Client-Secret" : client_secret}
+        rq = requests.get(url, headers=headers, verify=False)
+
         html = rq.text
         html_dict = xmltodict.parse(html)
-        self.html_dict = html_dict
+        # self.html_dict = html_dict
+        return html_dict
+
+
+    def search_blogs_by_API(self, keyword:str, display:int = 100):
+        
+        html_dict = self.request_blog_api(keyword, display = display)
 
         if html_dict["rss"]["channel"]["total"] == "0":
             blog_infos = None
         else:
             blog_infos = html_dict["rss"]["channel"]["item"]
-
+            if isinstance(blog_infos, list):
+                for total in range(200, 1001, 100):     
+                    if int(html_dict["rss"]["channel"]["total"]) >= total:
+                        temp_html_dict = self.request_blog_api(keyword, start = total-100+1)
+                        blog_infos.extend(temp_html_dict["rss"]["channel"]["item"])            
+            # if int(html_dict["rss"]["channel"]["total"]) >= 500:
+            #     for i in range(4):
+            #         temp_html_dict = self.request_blog_api(keyword, display = display, start = 1+(100*(i+1)))
+            #         blog_infos.extend(temp_html_dict["rss"]["channel"]["item"])
+            # if int(html_dict["rss"]["channel"]["total"]) >= 1000:
+            #     for i in range(5):
+            #         temp_html_dict = self.request_blog_api(keyword, display = display, start = min(501+(100*(i+1)), 1000))
+            #         blog_infos.extend(temp_html_dict["rss"]["channel"]["item"])
         
         return blog_infos
+
 
 
     # @check_execution_time
@@ -145,8 +197,32 @@ class NaverBlogCrawl:
                 print(f"img_name : {img_name}, img_url : {img_url}")
     
 
-    def collect_tags(self, blog_soup:BeautifulSoup):
-        blog_soup.find("a", attrs={"class":"item pcol2 itemTagfont _setTop"})
+
+    def collect_tags(self, blog_url:str):
+        blogId = re.search(r"blogId=([a-zA-Z0-9_-]+)", blog_url).group(1)
+        logNoList = re.search(r"logNo=([\d]+)", blog_url).group(1)
+
+        params_dict = {"blogId" : blogId,
+                       "logNoList" : logNoList,
+                       "logType" : "mylog"}
+        base_url = "https://blog.naver.com/BlogTagListInfo.naver"
+
+        rq = requests_retry_session().get(base_url, params = params_dict)
+        try:  
+            rq_json = rq.json()
+            if len(rq_json["taglist"]) >= 1:
+                tags = parse.unquote(rq_json["taglist"][0]["tagName"])
+            else:
+                tags = ""
+        except Exception as e:
+            print(rq.url)
+            tags = "Error"
+
+
+        return tags
+
+
+
     
     # @check_execution_time
     def parse_smarteditor_one(self, blog_body, keyword = "temp", blog_info:dict = None) -> dict:
@@ -330,32 +406,60 @@ class NaverBlogCrawl:
             else:
                 blog_info["bloggername"] = re.sub(r'/|\.|\*|%|\\|:|\?|\"|\'|\<|\>|\|','_',blog_info["bloggername"])
 
-
+        blog_contents_dict = defaultdict(list)
         # 블로그 본문
-        if blog_dom.find(".//div[@id='postViewArea']") is not None:
-            blog_type = "parse_smarteditor_2"
-            blog_contents_dict = {}
-            # blog_body = blog_dom.find(".//div[@id='postViewArea']")
-            # blog_contents_dict = self.parse_smarteditor_2(blog_body, keyword, blog_info)
+        try:
+            if blog_dom.find(".//div[@id='postViewArea']") is not None:
+                # print("2")
+                blog_type = "parse_smarteditor_2"
+                blog_contents_dict = {}
+                blog_body = blog_dom.find(".//div[@id='postViewArea']")
+                
+                for br in blog_body.findall("br"):
+                    br.replace_with("\n")             
 
-        elif blog_dom.find(".//div[@class='se-main-container']") is not None:
-            blog_type = "parse_smarteditor_one"
-            blog_body = blog_dom.find(".//div[@class='se-main-container']")
-            blog_contents_dict = self.parse_smarteditor_one(blog_body, keyword, blog_info)
-            blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+                text = blog_body.xpath(".//text()")
+                blog_contents_dict["contents"] = "\n".join([x for x in text if "\n" not in x])
+                blog_contents_dict["images"] = []
+                blog_contents_dict["image_urls"] = []
+                blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+                # blog_contents_dict = self.parse_smarteditor_2(blog_body, keyword, blog_info)
 
-        elif blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']") is not None:
-            blog_type = "parse_smarteditor_new"
-            blog_body = blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']")
-            blog_contents_dict = self.parse_smarteditor_new(blog_body, keyword, blog_info)
-            blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+            elif blog_dom.find(".//div[@class='se-main-container']") is not None:
+                # print("one")
+                blog_type = "parse_smarteditor_one"
+                blog_body = blog_dom.find(".//div[@class='se-main-container']")
 
-        else:
+                for br in blog_body.findall("br"):
+                    br.replace_with("\n")                       
+                text = blog_body.xpath(".//text()")
+                blog_contents_dict["contents"] = "\n".join([x for x in text if "\n" not in x])
+                blog_contents_dict["images"] = []
+                blog_contents_dict["image_urls"] = []
+                # blog_contents_dict = self.parse_smarteditor_one(blog_body, keyword, blog_info)
+                blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+
+            elif blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']") is not None:
+                # print("new")
+                blog_type = "parse_smarteditor_new"
+                blog_body = blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']")
+                for br in blog_body.findall("br"):
+                    br.replace_with("\n")                  
+                text = blog_body.xpath(".//text()")
+                blog_contents_dict["contents"] = "\n".join([x for x in text if "\n" not in x])
+                blog_contents_dict["images"] = []
+                blog_contents_dict["image_urls"] = []                
+                # blog_contents_dict = self.parse_smarteditor_new(blog_body, keyword, blog_info)
+                blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+
+            else:
+                print("else")
+                blog_type = "Else"
+                blog_contents_dict = {}
+        except Exception as e:
             blog_type = "Else"
             blog_contents_dict = {}
         
-        
-
 
         return blog_contents_dict, blog_type
 
@@ -378,26 +482,37 @@ class NaverBlogCrawl:
         return merged_dict
 
     # @check_execution_time
-    def collect_blog(self, keywords:Union[str,list[str]], keywords_start_idx:int = 0, num_blogs = 30):
-        self.result_dict = defaultdict(list)
-        if not hasattr(keywords, "__iter__"):
+    def collect_blog(self, keywords, keywords_start_idx = 0, num_blogs = 100, executor = None):
+        # self.result_dict = defaultdict(list)
+        if isinstance(keywords, (list, np.ndarray, tuple)) == False:
             self.keywords = [keywords]
         else:
             self.keywords = keywords
          
 
         for i, keyword in enumerate(self.keywords):
+            if i == 0:
+                time.sleep(random.randint(0, 10))
             if i < keywords_start_idx:
                 continue
             keyword_result_dict = defaultdict(list)
-            
-            self.blog_infos = self.search_blogs_by_API(keyword, num_blogs)
+
+            try: 
+                self.blog_infos = self.search_blogs_by_API(keyword, num_blogs)
+            except Exception as e:
+                print(e)
+                print(keyword)
+                continue
+
             if self.blog_infos is None:
                 continue
+
             if isinstance(self.blog_infos, dict):
                 self.blog_infos = [self.blog_infos]
             self.blog_infos = [blog_info for blog_info in self.blog_infos if "https://blog.naver.com" in blog_info["link"]] 
             
+            if executor is not None:
+                print(f"Executor : {executor}, ", end = "")
             print(f"{i}, keyword : {keyword}, # of blogs : {len(self.blog_infos)}")
             
             img_dir = os.path.join("./image", keyword)
@@ -410,12 +525,13 @@ class NaverBlogCrawl:
                 blop_dom = etree.HTML(blog_rq.text)
 
                 blog_contents_dict, blog_type = self.extract_contents(blop_dom, keyword, blog_info)
-                
+                self.blog_contents_dict = blog_contents_dict
                 if blog_contents_dict == {}:
                     continue
                 # self.save_images(blog_contents_dict["image_urls"], blog_contents_dict["images"], img_dir = img_dir)
 
-                # start_time = datetime.now()
+                tags = self.collect_tags(blog_url)
+
                 keyword_result_dict["keyword"].append(keyword)
                 keyword_result_dict["blog_type"].append(blog_type)
                 keyword_result_dict["title"].append(blog_info["title"])
@@ -423,12 +539,12 @@ class NaverBlogCrawl:
                 keyword_result_dict["post_date"].append(blog_info["postdate"])
                 keyword_result_dict["blog_url"].append(blog_url)
                 keyword_result_dict["contents"].append(blog_contents_dict["contents"])
+                keyword_result_dict["tags"].append(tags)
                 keyword_result_dict["images"].append(blog_contents_dict["images"])
                 keyword_result_dict["image_urls"].append(blog_contents_dict["image_urls"])
-                # end_time = datetime.now()
-                # print(f"insert dict Execution Time : {end_time - start_time}" )
 
-            self.result_dict = self.merge_dict(org_dict = self.result_dict, new_dict = keyword_result_dict) 
+
+            # self.result_dict = self.merge_dict(org_dict = self.result_dict, new_dict = keyword_result_dict) 
 
             file_keyword = keyword.replace("/","_")
             with open(f"./blog_dict/{file_keyword}_blog_dict.pkl", "wb") as f:
@@ -439,6 +555,6 @@ class NaverBlogCrawl:
                 # pd.DataFrame(self.result_dict).to_excel(f"Naver_Blog_{i+1-100}_{i+1}.xlsx", index = False, encoding = "CP949")
                 # self.result_dict = defaultdict(list)
                 # pd.DataFrame(self.result_dict).to_csv(f"Naver_Blog_{i}.csvw", index = False, encoding = "CP949")
-        return self.result_dict
+        # return self.result_dict
 
 

@@ -7,19 +7,16 @@ import numpy as np
 import sys
 import os
 import lxml
+import sys
 
-with open("search_keyword.pkl", "rb") as f:
+current_dir = sys.argv[0]
+num = int(sys.argv[1])
+split_num = int(sys.argv[2])
+
+with open(f"search_keywords.pkl", "rb") as f:
     search_keywords = pickle.load(f)
 
-num_cores = 2
-search_keywords_split = np.array_split(search_keywords[:4], num_cores)
+split_keywords = np.array_split(search_keywords, split_num)
 
-def collect_blog(keywords):
-    naver_blog_crawl = NaverBlogCrawl()
-    return naver_blog_crawl.collect_blog(keywords, keywords_start_idx = 0, num_blogs = 10)
-
-with Pool(num_cores) as p:
-    result = p.map(collect_blog, search_keywords_split)
-
-with open("result_dict.pkl", "wb") as f:
-    pickle.dump(result, f)
+naver_blog_crawl = NaverBlogCrawl()
+naver_blog_crawl.collect_blog(split_keywords[num-1], keywords_start_idx = 0, num_blogs = 100, executor=num)
