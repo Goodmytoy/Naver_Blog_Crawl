@@ -1,4 +1,3 @@
-from ast import If
 import os
 import sys
 # from tkinter import E
@@ -132,7 +131,7 @@ class NaverBlogCrawl:
         return html_dict
 
 
-    def search_blogs_by_API(self, keyword:str, display:int = 100, maximum:int = 100):
+    def search_blogs_by_API(self, keyword:str, display:int = 100):
         
         html_dict = self.request_blog_api(keyword, display = display)
 
@@ -141,9 +140,7 @@ class NaverBlogCrawl:
         else:
             blog_infos = html_dict["rss"]["channel"]["item"]
             if isinstance(blog_infos, list):
-                for total in range(200, 1001, 100):
-                    if len(blog_infos) > maximum:
-                        break
+                for total in range(200, 1001, 100):     
                     if int(html_dict["rss"]["channel"]["total"]) >= total:
                         temp_html_dict = self.request_blog_api(keyword, start = total-100+1)
                         blog_infos.extend(temp_html_dict["rss"]["channel"]["item"])            
@@ -235,7 +232,7 @@ class NaverBlogCrawl:
             br.replace_with("\n")
 
         # 본문 내에 Image와 Text가 있는 부분만 추출
-        blog_img_txt = blog_body.xpath(".//div[re:match(@class, 'se-module se-(module|section)-(text|image)')] | //a[re:match(@class, 'se-module se-(module|section)-(text|image)')]", 
+        blog_img_txt = blog_body.xpath(".//div[re:match(@class, 'se-(module|section)-(text|image)')]", 
                                        namespaces={"re": "http://exslt.org/regular-expressions"})
         
         blog_contents_dict = defaultdict(list)        
@@ -263,9 +260,9 @@ class NaverBlogCrawl:
                     img_urls.append(img_url)
                 
                 img_num += 1
-                img_name = f"{keyword}_{blog_info['bloggername']}_{blog_info['postdate']}_img_{img_num}.jpg"
+                img_name = f"[{keyword}_{blog_info['bloggername']}_{blog_info['postdate']}_img_{img_num}.jpg]"
                 img_names.append(img_name)
-                raw_blog_contents.append(f"[{img_name}]")
+                raw_blog_contents.append(img_name)
             elif re.search(r"se-(module|section)-text", x.attrib["class"]) is not None:
                 text_list = x.xpath(".//p/span//text()")
                 for text in text_list:
@@ -293,7 +290,7 @@ class NaverBlogCrawl:
         # 본문 내에 Image와 Text가 있는 부분만 추출
 
         # blog_body = blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']")
-        blog_img_txt = blog_body.xpath(".//div[re:match(@class, 'se_component se_(paragraph|image) (default)?')]", 
+        blog_img_txt = blog_body.xpath(".//div[re:match(@class, 'se_component se_(paragraph|image) default')]", 
                                        namespaces={"re": "http://exslt.org/regular-expressions"})        
 
         # image 파일 이름과 블로그 글을 하나의 contents로 엮어서 text 생성
@@ -316,9 +313,9 @@ class NaverBlogCrawl:
                 else:
                     img_urls.append(img_url)
 
-                img_name = f"{keyword}_{blog_info['bloggername']}_{blog_info['postdate']}_img_{img_num}.jpg"
+                img_name = f"[{keyword}_{blog_info['bloggername']}_{blog_info['postdate']}_img_{img_num}.jpg]"
                 img_names.append(img_name)
-                raw_blog_contents.append(f"[{img_name}]")
+                raw_blog_contents.append(img_name)
             elif re.search(r"se_paragraph", x.attrib["class"]) is not None:
                 text_list = x.xpath(".//p[@class='se_textarea']/span//text()")
                 for text in text_list:
@@ -421,6 +418,11 @@ class NaverBlogCrawl:
                 for br in blog_body.findall("br"):
                     br.replace_with("\n")             
 
+                text = blog_body.xpath(".//text()")
+                blog_contents_dict["contents"] = "\n".join([x for x in text if "\n" not in x])
+                blog_contents_dict["images"] = []
+                blog_contents_dict["image_urls"] = []
+                blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
                 # blog_contents_dict = self.parse_smarteditor_2(blog_body, keyword, blog_info)
 
             elif blog_dom.find(".//div[@class='se-main-container']") is not None:
@@ -429,9 +431,12 @@ class NaverBlogCrawl:
                 blog_body = blog_dom.find(".//div[@class='se-main-container']")
 
                 for br in blog_body.findall("br"):
-                    br.replace_with("\n")
-
-                blog_contents_dict = self.parse_smarteditor_one(blog_body, keyword, blog_info)
+                    br.replace_with("\n")                       
+                text = blog_body.xpath(".//text()")
+                blog_contents_dict["contents"] = "\n".join([x for x in text if "\n" not in x])
+                blog_contents_dict["images"] = []
+                blog_contents_dict["image_urls"] = []
+                # blog_contents_dict = self.parse_smarteditor_one(blog_body, keyword, blog_info)
                 blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
 
             elif blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']") is not None:
@@ -439,9 +444,12 @@ class NaverBlogCrawl:
                 blog_type = "parse_smarteditor_new"
                 blog_body = blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']")
                 for br in blog_body.findall("br"):
-                    br.replace_with("\n")
-              
-                blog_contents_dict = self.parse_smarteditor_new(blog_body, keyword, blog_info)
+                    br.replace_with("\n")                  
+                text = blog_body.xpath(".//text()")
+                blog_contents_dict["contents"] = "\n".join([x for x in text if "\n" not in x])
+                blog_contents_dict["images"] = []
+                blog_contents_dict["image_urls"] = []                
+                # blog_contents_dict = self.parse_smarteditor_new(blog_body, keyword, blog_info)
                 blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
 
             else:
@@ -474,7 +482,7 @@ class NaverBlogCrawl:
         return merged_dict
 
     # @check_execution_time
-    def collect_blog(self, keywords, keywords_start_idx = 0, num_blogs = 100, maximum = 100, executor = None, image = False):
+    def collect_blog(self, keywords, keywords_start_idx = 0, num_blogs = 100, executor = None):
         # self.result_dict = defaultdict(list)
         if isinstance(keywords, (list, np.ndarray, tuple)) == False:
             self.keywords = [keywords]
@@ -490,7 +498,7 @@ class NaverBlogCrawl:
             keyword_result_dict = defaultdict(list)
 
             try: 
-                self.blog_infos = self.search_blogs_by_API(keyword, display = num_blogs, maximum = maximum)
+                self.blog_infos = self.search_blogs_by_API(keyword, num_blogs)
             except Exception as e:
                 print(e)
                 print(keyword)
@@ -514,14 +522,13 @@ class NaverBlogCrawl:
                 self.blog_request_params = self.create_blog_request_params(blog_info)
 
                 blog_rq, blog_url = self.get_blog_request(self.blog_request_params)
-                blog_dom = etree.HTML(blog_rq.text)
+                blop_dom = etree.HTML(blog_rq.text)
 
-                blog_contents_dict, blog_type = self.extract_contents(blog_dom, keyword, blog_info)
+                blog_contents_dict, blog_type = self.extract_contents(blop_dom, keyword, blog_info)
                 self.blog_contents_dict = blog_contents_dict
                 if blog_contents_dict == {}:
                     continue
-                if image:
-                    self.save_images(blog_contents_dict["image_urls"], blog_contents_dict["images"], img_dir = img_dir)
+                # self.save_images(blog_contents_dict["image_urls"], blog_contents_dict["images"], img_dir = img_dir)
 
                 tags = self.collect_tags(blog_url)
 

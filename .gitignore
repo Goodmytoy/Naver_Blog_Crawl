@@ -129,6 +129,7 @@ dmypy.json
 .pyre/
 
 *.xlsx
+*.csv
 *.jpg
 *.exe
 *.zip
