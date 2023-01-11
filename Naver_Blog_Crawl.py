@@ -166,14 +166,14 @@ class NaverBlogCrawl:
         blog_link = blog_info["link"]
         blogger_link = blog_info["bloggerlink"]
 
-        logNo = re.search(r"logNo=([\d]+)", blog_link).group(1)
+        # logNo = re.search(r"logNo=([\d]+)", blog_link).group(1)
+        logNo = blog_link.split("/")[-1]
         bloggerId = blogger_link.split("/")[-1]
 
         # blog_url = f"https://blog.naver.com/PostView.naver?blogId={bloggerId}&logNo={logNo}&from=search&redirect=Log&widgetTypeCall=true&directAccess=false"
         blog_request_params = {"blogId" : bloggerId,
                                "logNo" : logNo,
-                               "from" : "search",
-                               "redirect" : "Log",
+                               "redirect" : "Dlog",
                                "widgetTypeCall" : "true",
                                "directAccess" :"false"}
         return blog_request_params
@@ -510,12 +510,14 @@ class NaverBlogCrawl:
             img_dir = os.path.join("./image", keyword)
 
             for _, blog_info in enumerate(self.blog_infos):
+                # print(blog_info)
                 self.blog_info = blog_info
                 self.blog_request_params = self.create_blog_request_params(blog_info)
 
                 blog_rq, blog_url = self.get_blog_request(self.blog_request_params)
+                self.blog_rq = blog_rq
                 blog_dom = etree.HTML(blog_rq.text)
-
+                self.blog_dom = blog_dom
                 blog_contents_dict, blog_type = self.extract_contents(blog_dom, keyword, blog_info)
                 self.blog_contents_dict = blog_contents_dict
                 if blog_contents_dict == {}:
