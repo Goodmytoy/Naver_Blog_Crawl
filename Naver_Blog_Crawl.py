@@ -210,15 +210,16 @@ class NaverBlogCrawl:
                        "logType" : "mylog"}
         base_url = "https://blog.naver.com/BlogTagListInfo.naver"
 
-        rq = requests_retry_session().get(base_url, params = params_dict)
-        try:  
+        
+        try:
+            rq = requests_retry_session().get(base_url, params = params_dict,verify = False)
             rq_json = rq.json()
             if len(rq_json["taglist"]) >= 1:
                 tags = parse.unquote(rq_json["taglist"][0]["tagName"])
             else:
                 tags = ""
         except Exception as e:
-            print(rq.url)
+            print(e)
             tags = "Error"
 
 
@@ -516,6 +517,7 @@ class NaverBlogCrawl:
 
                 blog_rq, blog_url = self.get_blog_request(self.blog_request_params)
                 self.blog_rq = blog_rq
+                self.blog_url = blog_url
                 blog_dom = etree.HTML(blog_rq.text)
                 self.blog_dom = blog_dom
                 blog_contents_dict, blog_type = self.extract_contents(blog_dom, keyword, blog_info)
