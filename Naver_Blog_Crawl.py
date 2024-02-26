@@ -136,17 +136,22 @@ class NaverBlogCrawl:
         
         html_dict = self.request_blog_api(keyword, display = display)
 
+        if html_dict.get("rss") is None:
+            return None 
         if html_dict["rss"]["channel"]["total"] == "0":
             blog_infos = None
         else:
             blog_infos = html_dict["rss"]["channel"]["item"]
             if isinstance(blog_infos, list):
-                for total in range(200, 1001, 100):
+                for total in range(200, 1001, display): # 최대 1000 페이지까지 지원
                     if len(blog_infos) > maximum:
                         break
                     if int(html_dict["rss"]["channel"]["total"]) >= total:
                         temp_html_dict = self.request_blog_api(keyword, start = total-100+1)
-                        blog_infos.extend(temp_html_dict["rss"]["channel"]["item"])            
+                        self.start = total-100+1
+                        self.temp_html_dict = temp_html_dict
+                        blog_infos.extend(temp_html_dict["rss"]["channel"]["item"])    
+                print(f"max_pages = {total}")        
             # if int(html_dict["rss"]["channel"]["total"]) >= 500:
             #     for i in range(4):
             #         temp_html_dict = self.request_blog_api(keyword, display = display, start = 1+(100*(i+1)))
@@ -457,7 +462,7 @@ class NaverBlogCrawl:
         return blog_contents_dict, blog_type
 
     def merge_dict(self, org_dict:dict, new_dict:dict, type:str = "full"):
-        merged_dict = deepcopy(org_dict)
+        merged_dict = org_dict
         if type == "full":
             keys = pd.unique(list(org_dict.keys()) + list(new_dict.keys()))
         elif type == "left":
@@ -476,7 +481,7 @@ class NaverBlogCrawl:
 
     # @check_execution_time
     def collect_blog(self, keywords, keywords_start_idx = 0, num_blogs = 100, maximum = 100, executor = None, image = False):
-        # self.result_dict = defaultdict(list)
+        self.result_dict = defaultdict(list)
         if isinstance(keywords, (list, np.ndarray, tuple)) == False:
             self.keywords = [keywords]
         else:
@@ -541,7 +546,7 @@ class NaverBlogCrawl:
                 keyword_result_dict["image_urls"].append(blog_contents_dict["image_urls"])
 
 
-            # self.result_dict = self.merge_dict(org_dict = self.result_dict, new_dict = keyword_result_dict) 
+            self.result_dict = self.merge_dict(org_dict = self.result_dict, new_dict = keyword_result_dict) 
 
             file_keyword = keyword.replace("/","_")
             with open(f"./blog_dict/{file_keyword}_blog_dict.pkl", "wb") as f:
@@ -552,6 +557,6 @@ class NaverBlogCrawl:
                 # pd.DataFrame(self.result_dict).to_excel(f"Naver_Blog_{i+1-100}_{i+1}.xlsx", index = False, encoding = "CP949")
                 # self.result_dict = defaultdict(list)
                 # pd.DataFrame(self.result_dict).to_csv(f"Naver_Blog_{i}.csvw", index = False, encoding = "CP949")
-        # return self.result_dict
+        return self.result_dict
 
 
