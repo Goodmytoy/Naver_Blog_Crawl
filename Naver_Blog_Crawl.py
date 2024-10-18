@@ -560,3 +560,286 @@ class NaverBlogCrawl:
         return self.result_dict
 
 
+
+
+
+class Naver_Blog:
+    base_url = "https://section.blog.naver.com/ajax/SearchList.naver"
+    def __init__(self):
+        pass
+
+    def create_params(self, keyword, page = 1, size = 30):
+        params = {"countPerPage" : size,
+                "currentPage" : page,
+                "keyword" : keyword,
+                "orderBy" : "recentdate", # sim/recentdate
+                "startDate": None,
+                "endDate": None,
+                "type" : "post"}
+            
+        return params
+
+    def create_headers(self, keyword):
+        enc_keyword = urllib.parse.quote(keyword)
+        headers = {"user-agent" : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+                   "Referer" : f"https://section.blog.naver.com/Search/Post.naver?pageNo=1&rangeType=ALL&orderBy=sim&keyword={enc_keyword}",
+                   "host" : "section.blog.naver.com"
+                   }
+
+        return headers
+
+    def extract_contents(self, rq):
+        json_rq = json.loads(re.search("\{\"result\":.*", rq.text)[0])
+        contents_list = json_rq.get("result").get("searchList")
+        
+        return contents_list 
+
+    def extract_total_count(self, rq):
+        json_rq = json.loads(re.search("\{\"result\":.*", rq.text)[0])
+        total_count = json_rq.get("result").get("totalCount")
+        
+        return int(total_count)
+
+    def request_content(self, keyword, page = 1, size = 30):
+        params = self.create_params(keyword = keyword, page = page, size = size)
+        headers = self.create_headers(keyword)
+        rq = requests.get(self.base_url, params = params, headers = headers, verify = False)
+
+        return rq
+
+    def request_contents(self, keyword, max_contents_num = 1000):
+        self.contents_list = []
+        size = 30
+        temp_rq = self.request_content(keyword, page = 1, size = 1)
+        total_count = self.extract_total_count(temp_rq)
+        print(total_count)
+        total_count = min(total_count, max_contents_num)
+
+        page_num = total_count // size
+        remainder = total_count % size
+
+        for p in tqdm(range(1, page_num+1)):
+            if p < -1:
+                continue
+            time.sleep(0.3)
+            rq = self.request_content(keyword, page = p, size = size)
+            rq_contents = self.extract_contents(rq)
+
+            self.contents_list.extend(rq_contents) 
+
+        return self.contents_list
+
+class Naver_Blog_Parse :
+    def __init__(self):
+        super.__init__(self)
+        pass
+    
+    @staticmethod
+    def merge_dict(org_dict:dict, new_dict:dict, type:str = "full"):
+        merged_dict = org_dict
+        if type == "full":
+            keys = pd.unique(list(org_dict.keys()) + list(new_dict.keys()))
+        elif type == "left":
+            keys = list(org_dict.keys())
+        elif type == "right":
+            keys = list(new_dict.keys())
+
+
+        for key in keys:
+            if isinstance(new_dict[key], list):
+                merged_dict[key].extend(new_dict[key])
+            else:
+                merged_dict[key].append(new_dict[key])
+        
+        return merged_dict
+    
+    
+    def request_blog(self, blog_url):
+        blog_rq = requests_retry_session().get(blog_url, verify=False)
+        return blog_rq
+    
+    def set_attrib_values(self, blog_info):
+        self.log_no = blog_info.get("logNo")
+        self.blogger_id = blog_info.get("domainIdOrBlogId")
+        self.blogger_nickname = blog_info.get("nickName")
+    
+    
+    # @check_execution_time
+    def extract_contents(self, blog_dom, keyword):
+        blog_contents_dict = defaultdict(list)
+        # 블로그 본문
+        try:
+            if blog_dom.find(".//div[@id='postViewArea']") is not None:
+                # print("2")
+                blog_type = "parse_smarteditor_2"
+                blog_contents_dict = {}
+                blog_body = blog_dom.find(".//div[@id='postViewArea']")
+                
+                for br in blog_body.findall("br"):
+                    br.replace_with("\n")             
+
+                # blog_contents_dict = self.parse_smarteditor_2(blog_body, keyword, blog_info)
+
+            elif blog_dom.find(".//div[@class='se-main-container']") is not None:
+                # print("one")
+                blog_type = "parse_smarteditor_one"
+                blog_body = blog_dom.find(".//div[@class='se-main-container']")
+
+                for br in blog_body.findall("br"):
+                    br.replace_with("\n")
+
+                blog_contents_dict = self.parse_smarteditor_one(blog_body, keyword, blog_info)
+                blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+
+            elif blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']") is not None:
+                # print("new")
+                blog_type = "parse_smarteditor_new"
+                blog_body = blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']")
+                for br in blog_body.findall("br"):
+                    br.replace_with("\n")
+              
+                blog_contents_dict = self.parse_smarteditor_new(blog_body, keyword, blog_info)
+                blog_contents_dict["contents"] = re.sub(r"[\x00-\x08\x0E-\x1F\x7F]+"," ", blog_contents_dict["contents"])
+
+            else:
+                print("else")
+                blog_type = "Else"
+                blog_contents_dict = {}
+        except Exception as e:
+            blog_type = "Else"
+            blog_contents_dict = {}
+        
+
+        return blog_contents_dict, blog_type
+
+
+    # @check_execution_time
+    def parse_smarteditor_one(self, blog_body, keyword = "temp", blog_info:dict = None) -> dict:
+        # https://blog.naver.com/PostView.naver?blogId=dreaminguth&logNo=222637214855&redirect=Dlog&widgetTypeCall=true&directAccess=false
+        
+        for br in blog_body.findall("br"):
+            br.replace_with("\n")
+
+        # 본문 내에 Image와 Text가 있는 부분만 추출
+        blog_img_txt = blog_body.xpath(".//div[re:match(@class, 'se-module se-(module|section)-(text|image)')] | //a[re:match(@class, 'se-module se-(module|section)-(text|image)')]", 
+                                       namespaces={"re": "http://exslt.org/regular-expressions"})
+        
+        blog_contents_dict = defaultdict(list)        
+
+        # image 파일 이름과 블로그 글을 하나의 contents로 엮어서 text 생성
+        raw_blog_contents = []
+        img_urls = []
+        img_names = []
+        img_num = 0
+
+        for x in blog_img_txt:
+            if re.search(r"se-(module|section)-image", x.attrib["class"]) is not None:
+                
+                try: 
+                    if "data-lazy-src" in x.find(".//img").attrib.keys():
+                        img_url = x.find(".//img").attrib["data-lazy-src"]
+                    else:
+                        img_url = x.find(".//img").attrib["src"]
+                except:
+                    continue
+                
+                if img_url in img_urls:
+                    continue
+                else:
+                    img_urls.append(img_url)
+                
+                img_num += 1
+                img_name = f"{keyword}_{blog_info['bloggername']}_{blog_info['postdate']}_img_{img_num}.jpg"
+                img_names.append(img_name)
+                raw_blog_contents.append(f"[{img_name}]")
+            elif re.search(r"se-(module|section)-text", x.attrib["class"]) is not None:
+                text_list = x.xpath(".//p/span//text()")
+                for text in text_list:
+                    if text is not None:
+                        raw_blog_contents.append(text)
+                
+
+        blog_contents = "\n".join(raw_blog_contents)
+        
+        blog_contents_dict["contents"] = blog_contents
+        blog_contents_dict["images"] = img_names
+        blog_contents_dict["image_urls"] = img_urls
+
+        return blog_contents_dict
+
+
+    # @check_execution_time
+    def parse_smarteditor_new(self, blog_body, keyword = "temp", blog_info:dict = None):
+        
+        for br in blog_body.findall("br"):
+            br.replace_with("\n")
+
+        blog_contents_dict = defaultdict(list)
+
+        # 본문 내에 Image와 Text가 있는 부분만 추출
+
+        # blog_body = blog_dom.find(".//div[@class='se_component_wrap sect_dsc __se_component_area']")
+        blog_img_txt = blog_body.xpath(".//div[re:match(@class, 'se_component se_(paragraph|image) (default)?')]", 
+                                       namespaces={"re": "http://exslt.org/regular-expressions"})        
+
+        # image 파일 이름과 블로그 글을 하나의 contents로 엮어서 text 생성
+        raw_blog_contents = []
+        img_urls = []
+        img_names = []
+        img_num = 0
+
+        for x in blog_img_txt:
+            
+            if re.search(r"se_image", x.attrib["class"]) is not None:
+                img_num += 1
+                if "data-lazy-src" in x.find(".//img").attrib.keys():
+                    img_url = x.find(".//img").attrib["data-lazy-src"]
+                else:
+                    img_url = x.find(".//img").attrib["src"]
+                
+                if img_url in img_urls:
+                    continue
+                else:
+                    img_urls.append(img_url)
+
+                img_name = f"{keyword}_{blog_info['bloggername']}_{blog_info['postdate']}_img_{img_num}.jpg"
+                img_names.append(img_name)
+                raw_blog_contents.append(f"[{img_name}]")
+            elif re.search(r"se_paragraph", x.attrib["class"]) is not None:
+                text_list = x.xpath(".//p[@class='se_textarea']/span//text()")
+                for text in text_list:
+                    if text is not None:
+                        raw_blog_contents.append(text)
+
+        blog_contents = "\n".join(raw_blog_contents)
+        
+        blog_contents_dict["contents"] = blog_contents
+        blog_contents_dict["images"] = img_names
+        blog_contents_dict["image_urls"] = img_urls
+
+        return blog_contents_dict
+    
+    
+    def collect_tags(self, blog_url:str):
+        blogId = re.search(r"blogId=([a-zA-Z0-9_-]+)", blog_url).group(1)
+        logNoList = re.search(r"logNo=([\d]+)", blog_url).group(1)
+
+        params_dict = {"blogId" : blogId,
+                       "logNoList" : logNoList,
+                       "logType" : "mylog"}
+        base_url = "https://blog.naver.com/BlogTagListInfo.naver"
+
+        
+        try:
+            rq = requests_retry_session().get(base_url, params = params_dict,verify = False)
+            rq_json = rq.json()
+            if len(rq_json["taglist"]) >= 1:
+                tags = parse.unquote(rq_json["taglist"][0]["tagName"])
+            else:
+                tags = ""
+        except Exception as e:
+            print(e)
+            tags = "Error"
+
+
+        return tags
